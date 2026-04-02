@@ -1,0 +1,248 @@
+// ============================================================
+//  ESP32 – L298N (Stepper) + BTS7960 (DC Motor) Controller
+//  Compatible with ESP32 Arduino Core 3.x
+// ============================================================
+ 
+// ---------- L298N – Stepper Motor Pins ----------
+#define ENA_PIN   14
+#define ENB_PIN   27
+#define IN1_PIN   26
+#define IN2_PIN   25
+#define IN3_PIN   21
+#define IN4_PIN   18
+ 
+// ---------- BTS7960 – DC Motor Pins ----------
+#define RPWM_PIN  33
+#define LPWM_PIN  32
+#define R_EN_PIN  23
+#define L_EN_PIN  22
+ 
+// ---------- Limit Switch ----------
+#define LIMIT_SW  19
+ 
+// ---------- PWM Config ----------
+#define PWM_FREQ  5000
+#define PWM_RES   8      // 8-bit → 0-255
+ 
+// ---------- Stepper config ----------
+#define MIN_STEP_DELAY 500  // microseconds — prevents stall from too-fast commands
+int stepDelay_us        = 2000;
+int stepperPos          = 0;
+ 
+// --- Continuous Stepper Tracking ---
+bool stepperContinuous     = false;
+bool stepperDir            = true;
+unsigned long lastStepTime = 0;
+ 
+// Full-step sequence: IN1 IN2 IN3 IN4
+const bool stepSeq[4][4] = {
+  {1, 0, 1, 0},
+  {0, 1, 1, 0},
+  {0, 1, 0, 1},
+  {1, 0, 0, 1}
+};
+ 
+// ============================================================
+void setup() {
+  Serial.begin(115200);
+ 
+  // --- Stepper direction pins ---
+  pinMode(IN1_PIN, OUTPUT);
+  pinMode(IN2_PIN, OUTPUT);
+  pinMode(IN3_PIN, OUTPUT);
+  pinMode(IN4_PIN, OUTPUT);
+ 
+  // --- BTS7960 Enable Pins ---
+  pinMode(R_EN_PIN, OUTPUT);
+  pinMode(L_EN_PIN, OUTPUT);
+  digitalWrite(R_EN_PIN, HIGH);
+  digitalWrite(L_EN_PIN, HIGH);
+ 
+  // --- Limit switch ---
+  pinMode(LIMIT_SW, INPUT_PULLUP);
+ 
+  // --- LEDC PWM setup (Core 3.x API) ---
+  // ledcAttachPin(pin, channel, freq, resolution) — all in one call
+  ledcAttachChannel(ENA_PIN,  PWM_FREQ, PWM_RES, 0);
+  ledcAttachChannel(ENB_PIN,  PWM_FREQ, PWM_RES, 1);
+  ledcAttachChannel(RPWM_PIN, PWM_FREQ, PWM_RES, 2);
+  ledcAttachChannel(LPWM_PIN, PWM_FREQ, PWM_RES, 3);
+ 
+  // Enable L298N bridges at full power
+  ledcWrite(ENA_PIN, 255);
+  ledcWrite(ENB_PIN, 255);
+ 
+  // BTS7960 off at start
+  ledcWrite(RPWM_PIN, 0);
+  ledcWrite(LPWM_PIN, 0);
+ 
+  Serial.println("System ready. Core 3.x LEDC API active.");
+  Serial.println("Commands:");
+  Serial.println("  f<delay>  e.g. f2000  (stepper FORWARD, delay in microseconds)");
+  Serial.println("  b<delay>  e.g. b2000  (stepper BACKWARD, delay in microseconds)");
+  Serial.println("  f / b     (no number = use current speed)");
+  Serial.println("  s<steps>  e.g. s200   (stepper specific steps, + fwd / - rev)");
+  Serial.println("  p<delay>  e.g. p1000  (set speed without moving, smaller=faster)");
+  Serial.println("  h         (stepper HALT)");
+  Serial.println("  d<speed>  e.g. d180   (DC motor forward, 0-255)");
+  Serial.println("  r<speed>  e.g. r180   (DC motor reverse, 0-255)");
+  Serial.println("  x         (stop DC motor)");
+}
+ 
+// ============================================================
+void loop() {
+ 
+  // --- Limit switch check ---
+  if (digitalRead(LIMIT_SW) == HIGH) {
+    Serial.println("Limit switch triggered – stopping motors!");
+    stepperContinuous = false;
+    stepperOff();
+    dcMotorStop();
+    while (digitalRead(LIMIT_SW) == HIGH) delay(10);
+    return;
+  }
+ 
+  // --- Continuous Stepper Engine ---
+  if (stepperContinuous) {
+    if (micros() - lastStepTime >= (unsigned long)stepDelay_us) {
+      stepOnce(stepperDir);
+      lastStepTime = micros();
+    }
+  }
+ 
+  // --- Serial command handler ---
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+ 
+    if (cmd.length() == 0) return;
+ 
+    char type = cmd.charAt(0);
+    int  val  = cmd.substring(1).toInt();
+ 
+    switch (type) {
+ 
+      case 's':
+      case 'S': {
+        int steps = val;
+        bool dir  = (steps >= 0);
+        steps     = abs(steps);
+        stepperContinuous = false;
+        Serial.printf("Stepper: %d steps %s at delay=%d us\n", steps, dir ? "CW" : "CCW", stepDelay_us);
+        for (int i = 0; i < steps; i++) {
+          if (digitalRead(LIMIT_SW) == HIGH) {
+            Serial.println("Limit hit – aborting!");
+            break;
+          }
+          stepOnce(dir);
+          delayMicroseconds(stepDelay_us);
+        }
+        stepperOff();
+        break;
+      }
+ 
+      case 'f':
+      case 'F':
+        if (val > 0) stepDelay_us = max(val, MIN_STEP_DELAY);
+        stepperContinuous = true;
+        stepperDir = true;
+        Serial.printf("Stepper: Running continuously FORWARD at delay=%d us\n", stepDelay_us);
+        break;
+ 
+      case 'b':
+      case 'B':
+        if (val > 0) stepDelay_us = max(val, MIN_STEP_DELAY);
+        stepperContinuous = true;
+        stepperDir = false;
+        Serial.printf("Stepper: Running continuously BACKWARD at delay=%d us\n", stepDelay_us);
+        break;
+ 
+      case 'p':
+      case 'P':
+        if (val > 0) {
+          stepDelay_us = max(val, MIN_STEP_DELAY);
+          Serial.printf("Stepper speed set: delay=%d us%s\n", stepDelay_us,
+                        stepperContinuous ? " (applied immediately)" : "");
+        } else {
+          Serial.println("Invalid speed. Use p<delay> e.g. p1000");
+        }
+        break;
+ 
+      case 'h':
+      case 'H':
+        stepperContinuous = false;
+        stepperOff();
+        Serial.println("Stepper: STOPPED.");
+        break;
+ 
+      case 'd':
+      case 'D':
+        val = constrain(val, 0, 255);
+        Serial.printf("DC Motor FWD speed=%d\n", val);
+        dcMotorForward(val);
+        break;
+ 
+      case 'r':
+      case 'R':
+        val = constrain(val, 0, 255);
+        Serial.printf("DC Motor REV speed=%d\n", val);
+        dcMotorReverse(val);
+        break;
+ 
+      case 'x':
+      case 'X':
+        Serial.println("DC Motor STOP");
+        dcMotorStop();
+        break;
+ 
+      default:
+        Serial.println("Unknown command.");
+    }
+  }
+}
+ 
+// ============================================================
+//  Stepper helpers
+// ============================================================
+ 
+void stepOnce(bool clockwise) {
+  if (clockwise) {
+    stepperPos = (stepperPos + 1) % 4;
+  } else {
+    stepperPos = (stepperPos + 3) % 4;
+  }
+  applyStep(stepperPos);
+}
+ 
+void applyStep(int idx) {
+  digitalWrite(IN1_PIN, stepSeq[idx][0]);
+  digitalWrite(IN2_PIN, stepSeq[idx][1]);
+  digitalWrite(IN3_PIN, stepSeq[idx][2]);
+  digitalWrite(IN4_PIN, stepSeq[idx][3]);
+}
+ 
+void stepperOff() {
+  digitalWrite(IN1_PIN, LOW);
+  digitalWrite(IN2_PIN, LOW);
+  digitalWrite(IN3_PIN, LOW);
+  digitalWrite(IN4_PIN, LOW);
+}
+ 
+// ============================================================
+//  BTS7960 DC motor helpers
+// ============================================================
+ 
+void dcMotorForward(int speed) {
+  ledcWrite(LPWM_PIN, 0);
+  ledcWrite(RPWM_PIN, speed);
+}
+ 
+void dcMotorReverse(int speed) {
+  ledcWrite(RPWM_PIN, 0);
+  ledcWrite(LPWM_PIN, speed);
+}
+ 
+void dcMotorStop() {
+  ledcWrite(RPWM_PIN, 0);
+  ledcWrite(LPWM_PIN, 0);
+}

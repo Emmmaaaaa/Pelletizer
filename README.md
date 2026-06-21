@@ -1,6 +1,4 @@
 Opensource Pelletizer — Pellets 15
-**Western University | ES 1050 2025–26 
-**Team:** Emma Chan, Adriana Ricciardelli, Baanujan Sivapalan, Russell Fahr, Ashton Dinglasan
 ---
 ## 📖 Project Description
  

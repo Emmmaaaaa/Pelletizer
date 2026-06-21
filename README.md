@@ -23,6 +23,7 @@ The goal is to close the loop on 3D printing plastic waste in a low-cost, reprod
 ## Code Overview
  
 The firmware runs on an **ESP32 Dev Board**.
+
 ![Electrical Schematic illustrating the interconnection between the ESP32 microcontroller and dual-motor driver stages](https://media.discordapp.net/attachments/1257901389582172223/1518386574625341510/image.png?ex=6a39bb31&is=6a3869b1&hm=64cf844ad62e64477deed3ec48768c89b84b04bbb5db8e1e85a725e9816630a5&=&format=webp&quality=lossless&width=983&height=420
 )
  

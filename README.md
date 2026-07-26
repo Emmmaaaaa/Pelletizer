@@ -6,7 +6,6 @@ This project is an open-source filament pelletizer designed to recycle 3D printi
  
 The goal is to close the loop on 3D printing plastic waste in a low-cost, reproducible, and open-source way. The entire housing is FDM 3D printed in PETG, and the total build cost is approximately **$233.62 CAD**.
 
-![Outline of finalized design](https://media.discordapp.net/attachments/1257901389582172223/1518386515305042000/image.png?ex=6a39bb23&is=6a3869a3&hm=583dffc3bbe136aeb5d3428026d4349e332f045c8d91530427892bb592990a4c&=&format=webp&quality=lossless&width=960&height=371)
  
 ### Key Features
  
@@ -23,9 +22,6 @@ The goal is to close the loop on 3D printing plastic waste in a low-cost, reprod
 ## Code Overview
  
 The firmware runs on an **ESP32 Dev Board**.
-
-![Electrical Schematic illustrating the interconnection between the ESP32 microcontroller and dual-motor driver stages](https://media.discordapp.net/attachments/1257901389582172223/1518386574625341510/image.png?ex=6a39bb31&is=6a3869b1&hm=64cf844ad62e64477deed3ec48768c89b84b04bbb5db8e1e85a725e9816630a5&=&format=webp&quality=lossless&width=983&height=420
-)
  
 ### What the code does
  
